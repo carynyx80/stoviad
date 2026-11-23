@@ -34,3 +34,37 @@
 html, body { background: var(--ink); color: var(--bone); }
 body { font-family: var(--font-display), system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
 ::selection { background: var(--gold); color: var(--ink); }
+
+/* ===== Landing (Stovia homepage) ===== */
+html { scroll-behavior: smooth; }
+.st-grain::before {
+  content: "";
+  position: fixed; inset: -50%;
+  z-index: 60; pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  animation: st-grain 1.2s steps(6) infinite;
+}
+@keyframes st-grain {
+  0% { transform: translate(0,0); } 20% { transform: translate(-3%,2%); } 40% { transform: translate(2%,-3%); }
+  60% { transform: translate(-2%,-1%); } 80% { transform: translate(3%,3%); } 100% { transform: translate(0,0); }
+}
+.st-outline { color: transparent; -webkit-text-stroke: 1px rgba(224,161,0,0.18); }
+.st-rings {
+  background: repeating-radial-gradient(circle at center, transparent 0 38px, rgba(224,161,0,0.10) 38px 39px);
+  border-radius: 9999px;
+  mask-image: radial-gradient(circle, black 30%, transparent 70%);
+}
+.st-marquee { animation: st-marquee 48s linear infinite; }
+.st-marquee-rev { animation: st-marquee 48s linear infinite reverse; }
+@keyframes st-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.st-pulse { animation: st-pulse 1.6s ease-in-out infinite; }
+@keyframes st-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(224,161,0,0.6); } 50% { opacity: .5; box-shadow: 0 0 0 6px rgba(224,161,0,0); } }
+.st-blink { animation: st-blink 1s steps(2) infinite; }
+@keyframes st-blink { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .st-marquee, .st-marquee-rev, .st-grain::before, .st-pulse, .st-blink { animation: none; }
+}
+.st-outline-bone { color: transparent; -webkit-text-stroke: 1px rgba(243,234,216,0.28); }
+.group:hover .st-outline-bone { -webkit-text-stroke-color: var(--gold); }
+.st-redact { display: inline-block; height: 0.8em; vertical-align: -0.05em; background: repeating-linear-gradient(135deg, rgba(243,234,216,0.22) 0 4px, rgba(243,234,216,0.08) 4px 8px); }
