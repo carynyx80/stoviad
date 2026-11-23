@@ -10,7 +10,7 @@ export function SectionShell({ k, children, aside }: { k: SectionKey; children: 
   const i = sectionIndex(k);
   const accent = s.tone === "gold" ? "text-gold" : "text-blood-hot";
   return (
-    <div className="relative min-h-[calc(100dvh-64px)] overflow-hidden bg-ink">
+    <div className="relative min-h-[calc(100dvh-96px)] overflow-hidden bg-ink">
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_85%_0%,rgba(224,161,0,0.07),transparent_50%),radial-gradient(ellipse_at_0%_100%,rgba(142,11,11,0.18),transparent_45%)]" />
       <header className="relative z-10 flex h-14 items-center justify-between gap-3 border-b border-line px-4 sm:px-8">
         <Link href="/app" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-bone-dim transition hover:text-gold focus-visible:outline-2 focus-visible:outline-gold">

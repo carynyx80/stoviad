@@ -75,7 +75,7 @@ export function Slideshow() {
     <section
       aria-roledescription="carousel"
       aria-label="Stovia app sections"
-      className="relative flex h-[calc(100dvh-64px)] min-h-[560px] flex-col overflow-hidden bg-ink"
+      className="relative flex h-[calc(100dvh-96px)] min-h-[560px] flex-col overflow-hidden bg-ink"
       onWheel={onWheel}
     >
       {/* grain / vignette */}

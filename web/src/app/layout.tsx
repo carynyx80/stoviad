@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import HeliusBar from "@/components/HeliusBar";
 
 const display = Bricolage_Grotesque({ variable: "--font-display", subsets: ["latin"] });
 const serif = Instrument_Serif({ variable: "--font-serif", subsets: ["latin"], weight: "400", style: ["normal", "italic"] });
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body className={`${display.variable} ${serif.variable} ${mono.variable} antialiased bg-ink text-bone`}>
+        <HeliusBar />
         {children}
       </body>
     </html>
