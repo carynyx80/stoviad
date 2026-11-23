@@ -13,5 +13,11 @@
     "stateTree": "777pvSGe5LaBd9nCczvE2FXEauiwtfGJ5XRpjKyniGor",
     "solInterfacePda": "CiNmas621VuyofiDSrEPfTXHKrdZuB6jMKECyNiMpLXE"
   },
-  "domain": "www.stovia.xyz"
+  "domain": "www.stovia.xyz",
+  "meteoraDbc": {
+    "program": "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+    "config": "ESZF2rgMjjeWYyAq5XDBSujpt3hGtjsEmW825N4e5fFy",
+    "tradeFeeBps": 25,
+    "split": "Stovia 0.10% / creator 0.10% / Meteora 0.05%"
+  }
 }
