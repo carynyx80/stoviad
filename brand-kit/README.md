@@ -27,6 +27,7 @@
 |---|---|
 | stovia-profile-400.png / stovia-profile-800.png | X profile picture (mark sits inside X's circle crop) |
 | stovia-x-banner-1500x500.png / stovia-x-banner-3000x1000.png | X header (text kept clear of the profile-photo overlap) |
+| stovia-launch-1600x900.png / stovia-launch-3200x1800.png | Launch tweet image (16:9, shows uncropped in the X feed) |
 | stovia-logo-lockup.png | Mark + wordmark, 2400x800 |
 | stovia-mark.svg / stovia-mark-1024.png | Mark on transparent background |
 | stovia-mark-on-black.svg / stovia-mark-on-black-1024.png | Mark on black |
