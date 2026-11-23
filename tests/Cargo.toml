@@ -1,0 +1,19 @@
+[package]
+name = "stovia-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone (not part of the program workspace) so `anchor build` never compiles it for SBF.
+[workspace]
+
+[dependencies]
+
+[dev-dependencies]
+litesvm = "0.6"
+solana-sdk = "2.2"
+sha2 = "0.10"
+spl-token = { version = "8", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "7", features = ["no-entrypoint"] }
+borsh = "1"
+openssl = { version = "0.10", features = ["vendored"] }

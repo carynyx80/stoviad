@@ -12,3 +12,4 @@ keys/
 .anchor/
 test-ledger/
 web/screenshots/
+tests/target/

@@ -1,0 +1,19 @@
+[toolchain]
+anchor_version = "0.32.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.mainnet]
+stovia = "6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8"
+
+[programs.localnet]
+stovia = "6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8"
+
+[provider]
+cluster = "mainnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo build-sbf --manifest-path programs/stovia/Cargo.toml --arch v0 --sbf-out-dir target/deploy-v0 && cargo test --manifest-path tests/Cargo.toml -- --nocapture"
