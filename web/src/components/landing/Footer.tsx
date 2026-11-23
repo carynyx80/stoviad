@@ -1,6 +1,7 @@
 import Link from "next/link";
 import config from "@/stovia.config.json";
 import { Logo } from "./Nav";
+import PoweredByHelius from "@/components/brand/PoweredByHelius";
 
 const short = (s: string) => `${s.slice(0, 4)}…${s.slice(-4)}`;
 
@@ -38,6 +39,7 @@ export default function Footer() {
             <span className="st-pulse h-1.5 w-1.5 rounded-full bg-gold" />
             LIVE ON SOLANA MAINNET
           </span>
+          <PoweredByHelius variant="inline" />
           <span>MEMECOINS ARE RISKY. MOST DIE. TRADE WHAT YOU CAN LOSE.</span>
           <span>&copy; 2026 STOVIA</span>
         </div>

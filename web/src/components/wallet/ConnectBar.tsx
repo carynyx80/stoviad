@@ -6,6 +6,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Check, Copy, LogOut, Wallet } from "lucide-react";
 import { useSolBalance } from "./useSolBalance";
 import { fmtSol, shortAddr } from "@/lib/format";
+import PoweredByHelius from "@/components/brand/PoweredByHelius";
 
 export const BAR_HEIGHT = 64;
 
@@ -49,6 +50,7 @@ export function ConnectBar() {
           </span>
           Mainnet
         </span>
+        <PoweredByHelius className="hidden shrink-0 lg:inline-flex" />
 
         <div className="min-w-0 flex-1 font-mono text-[11px] text-bone-dim sm:text-xs">
           {isOn ? (

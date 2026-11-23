@@ -3,6 +3,7 @@
 import { motion, useScroll, useTransform } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import MagneticCTA from "./Magnetic";
+import PoweredByHelius from "@/components/brand/PoweredByHelius";
 
 const START = 71 * 3600 + 59 * 60 + 41; // deterministic start for SSR
 
@@ -158,6 +159,14 @@ export default function Hero() {
                 <span className="font-serif italic text-gold text-[1.15em]">Get paid when you get rugged.</span>
               </p>
               <MagneticCTA />
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.95, duration: 0.7 }}
+              className="mt-8"
+            >
+              <PoweredByHelius />
             </motion.div>
           </div>
 
