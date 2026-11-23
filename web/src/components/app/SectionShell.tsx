@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StoviaLogo } from "@/components/brand/StoviaLogo";
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { SECTIONS, sectionByKey, sectionIndex, type SectionKey } from "@/lib/sections";
@@ -29,7 +30,7 @@ export function SectionShell({ k, children, aside }: { k: SectionKey; children: 
           ))}
         </nav>
         <Link href="/" className="font-display text-base font-extrabold tracking-tight text-bone">
-          STOVIA<span className="text-gold">.</span>
+          <StoviaLogo markClassName="h-6 w-6" textClassName="text-[22px]" />
         </Link>
       </header>
 

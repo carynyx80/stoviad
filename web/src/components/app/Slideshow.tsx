@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { StoviaLogo } from "@/components/brand/StoviaLogo";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion, type PanInfo, type Variants } from "framer-motion";
 import { ArrowLeft, ArrowRight, ArrowUpRight } from "lucide-react";
@@ -84,7 +85,7 @@ export function Slideshow() {
       {/* Top bar */}
       <header className="relative z-20 flex h-14 shrink-0 items-center justify-between px-4 sm:px-8">
         <Link href="/" className="font-display text-lg font-extrabold tracking-tight text-bone focus-visible:outline-2 focus-visible:outline-gold">
-          STOVIA<span className="text-gold">.</span>
+          <StoviaLogo markClassName="h-6 w-6" textClassName="text-[22px]" />
         </Link>
         <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.2em] text-bone-dim">
           <span className="hidden sm:inline">The app</span>

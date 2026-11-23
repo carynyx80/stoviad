@@ -1,16 +1,8 @@
+import { StoviaLogo } from "@/components/brand/StoviaLogo";
 import Link from "next/link";
 
 export function Logo({ className = "" }: { className?: string }) {
-  return (
-    <span className={`inline-flex items-center gap-2 font-display font-extrabold tracking-tight ${className}`}>
-      <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden>
-        <circle cx="16" cy="16" r="14" fill="none" stroke="var(--gold)" strokeWidth="2.5" />
-        <path d="M16 6 V16 L23 21" fill="none" stroke="var(--bone)" strokeWidth="2.5" strokeLinecap="square" />
-        <circle cx="16" cy="16" r="2.5" fill="var(--blood-hot)" />
-      </svg>
-      <span className="text-xl">Stovia</span>
-    </span>
-  );
+  return <StoviaLogo className={className} />;
 }
 
 export default function Nav() {
