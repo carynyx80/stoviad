@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+/* Stovia palette: black, deep yellow, deep red. Dark-only by design. */
+:root {
+  --ink: #050403;
+  --ink-2: #0e0b08;
+  --ink-3: #1a1510;
+  --line: #2a2118;
+  --bone: #f3ead8;
+  --bone-dim: #a89a82;
+  --gold: #e0a100;      /* deep yellow */
+  --gold-hot: #ffbf1f;
+  --blood: #8e0b0b;     /* deep red */
+  --blood-hot: #c4161c;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-bone: var(--bone);
+  --color-bone-dim: var(--bone-dim);
+  --color-gold: var(--gold);
+  --color-gold-hot: var(--gold-hot);
+  --color-blood: var(--blood);
+  --color-blood-hot: var(--blood-hot);
+  --font-display: var(--font-display);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --font-sans: var(--font-display);
+}
+
+html, body { background: var(--ink); color: var(--bone); }
+body { font-family: var(--font-display), system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+::selection { background: var(--gold); color: var(--ink); }

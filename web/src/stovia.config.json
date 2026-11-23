@@ -1,0 +1,15 @@
+{
+  "name": "Stovia",
+  "network": "mainnet-beta",
+  "programId": "6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8",
+  "companyWallet": "3aeVzSa3XKR8vstMFkXzVCnokcC4LApQPH3S8G7ckLgm",
+  "platformFeeBps": 10,
+  "creatorFeeBps": 10,
+  "privacyRings": {
+    "program": "ring1GaLCuJnkUMVkX2JeZLTTX17wKsV4fZmPVzXANW",
+    "userRegistry": "regy3WAeRXMYuMYxr5iK3Bf9Arr3PcxGxyzAddbiqDQ",
+    "stateTree": "777pvSGe5LaBd9nCczvE2FXEauiwtfGJ5XRpjKyniGor",
+    "solInterfacePda": "CiNmas621VuyofiDSrEPfTXHKrdZuB6jMKECyNiMpLXE"
+  },
+  "domain": "www.stovia.xyz"
+}
