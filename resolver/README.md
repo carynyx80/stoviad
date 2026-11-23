@@ -1,10 +1,57 @@
 # Stovia resolver
 
-The resolver is the off-chain service that makes Stovia's sealed bets work with Helius Privacy Rings. It is a self-contained Node 22 package and deploys as its own Railway service with root `resolver/`.
+The resolver is the whole survival-market engine. **There is no Stovia on-chain program** (it is not deployed). It is a self-contained Node 22 package and deploys as its own Railway service with root `resolver/`.
 
-- **Bet sides** are commit-reveal on-chain (`commit_sealed_bet`, `reveal_sealed_bet`).
-- **Bet amounts** move privately as default-ring Rings transfers. The ring hides asset and amount. Sender and recipient stay visible.
-- **Custody:** a program PDA cannot trustlessly own shielded funds yet (see `docs/privacy-rings.md`). So each market gets a **market shielded identity**, derived from `RESOLVER_MASTER_SEED`.
+- **Tokens** launch on **Meteora Dynamic Bonding Curve** (program `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN`), built by the web app. Market id = DBC pool address.
+- **Bets** are off-chain commit-reveal: the bettor's wallet signs `commitment = sha256(side_u8 ‖ salt ‖ bettor)` and `stakeCommitment = sha256(amount_le_u64 ‖ salt2 ‖ bettor)`. Commitments are public (`GET /markets/:m/commitments`).
+- **Stakes** move privately as Helius Privacy Rings transfers to a per-market shielded identity derived from `RESOLVER_MASTER_SEED`. The ring hides asset and amount; sender and recipient stay visible.
+- **Settlement** reads the token's market cap from the DBC pool every ~60 s and compares its TWAP (launch → deadline) against the creator's target.
+- **Payouts** are claimed by winners: the resolver builds an unsigned Rings tx (proof made with the market identity, fee payer = winner); the winner signs and pays the fee.
+- **Treasury**: leftovers after the 7-day claims window go to the company wallet via the admin queue.
+
+## Survival market lifecycle
+
+```
+POST /launches ──► open ──deadline──► revealing ──deadline+24h──► survived|died ──+7d──► sweeping ──► done
+                  (commit, stake,     (reveal, register stakes      (winners claim         (admin queue,
+                   bond; mcap          whose transfer landed          with /claims/build)    company signs)
+                   sampled ~60s)       before the deadline)
+```
+
+- **Launch** (`POST /launches`): the creator signs `stovia-launch:${pool}:${mint}:${targetMcapLamports}:${deadlineTs}`. The resolver checks: tweetnacl signature; pool account owner = DBC program and VirtualPool discriminator; `base_mint == mint`; `creator == creator`; the pool config's `quote_mint` is wSOL (mcap is measured in lamports); not migrated; deadline 1 h to 30 d ahead; target > current mcap. Idempotent.
+- **Mcap** = `floor(sqrt_price² × mint.supply / 2¹²⁸)` lamports. `sqrt_price` is Q64.64 of quote-raw per base-raw, so decimals cancel. Decoded fields of `VirtualPool` (bytemuck, after the 8-byte discriminator `d5e005d16245775c`): `config` @72, `creator` @104, `base_mint` @136, `base_reserve` @232, `quote_reserve` @240, `sqrt_price` (u128) @280, `is_migrated` @305. `PoolConfig.quote_mint` @8. Supply from the SPL/Token-2022 mint @36.
+- **TWAP**: step-hold integral `cum += lastMcap × dt`, `twap = cum / (deadline − launch)`. Gaps (worker down, RPC errors) hold the last value; post-deadline samples never count. **Migration**: when `is_migrated` flips, sampling stops and the last value is held to the deadline (DBC freezes `sqrt_price` at the graduation price). Reading the post-migration DAMM pool is not implemented.
+- **Commit** (`POST /bets/commit`): before the deadline only, one per bettor per market, signature over `stovia-bet:${market}:${commitment}:${stakeCommitment}`.
+- **Stake** (`POST /stakes/claim`): after one Rings transfer of `amount` to the market's shielded address. Checked: `sha256(amount‖salt2‖bettor)` equals the signed `stakeCommitment`; the bettor signed the tx; **the tx's blockTime ≤ deadline** (otherwise a bettor could fund only winning bets); the decrypted inbound amount equals `amount`; the tx is not reused. Accepted until reveal end.
+- **Reveal** (`POST /bets/reveal`): deadline ≤ now < deadline+24 h; signature over `stovia-reveal:${market}:${side}:${salt}`; must match the commitment.
+- **Bond** (`POST /launches/:market/bond`, optional): creator signs `stovia-bond:${market}:${amount}:${ringsTxSignature}`; same deposit checks as stakes. Survived → refunded to the creator. Died → added to the pool the NO winners share. Died with no NO winners → treasury.
+- **Settlement** at reveal end: `survived = twap ≥ target`. Pools come from verified **and** revealed stakes only. Winner payout = `stake + floor(stake × (losing + bond_if_died) / winning)`. If the winning side is empty, valid losers are refunded. Unrevealed and unverified stakes, dust and unclaimed payouts are swept.
+- **Claims** (`POST /claims/build` → sign → `POST /claims/submitted`): one in-flight claim per market (a "claim slot"). While held, the same winner gets the same cached tx bytes; others get `409 market_busy`. `/claims/submitted` only accepts the winner's signature over the exact message the resolver built, then verifies on-chain: confirmed, signed by the winner, market wallet shows an outbound row of exactly the payout. A slot is released only when paid, failed, or its blockhash expired (+150 blocks) **and** a fresh wallet sync shows no matching unattributed outbound row. If one exists, it is attributed and marked paid. So at most one payout can land per winner. With `shieldedAddress` (or a registered payout address) the payout is a private transfer. Otherwise it is a public withdrawal to the winner's wallet, which reveals the amount.
+- **Treasury**: at `claimsCloseTs = revealEnds + 7 d` (claims stop 10 min earlier), unpaid payouts become `forfeited` and one `sweep` admin action withdraws the remaining balance to the company wallet. `RESOLVER_SEND_ENABLED` gates only this admin-queue step. Claims are always available.
+
+## API (survival markets)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/launches` | creator sig | `{pool, mint, creator, name, symbol, uri, targetMcapLamports, deadlineTs, signature}` → 201 (200 if repeated) `{market, shieldedAddress (hex), shieldedAddressBase64, shieldedOwner, ...market view}` |
+| POST | `/launches/:market/bond` | creator sig | `{amount, salt2?, ringsTxSignature, signature}` |
+| GET | `/markets` | none | `{markets:[view]}`, filter `?status=open\|revealing\|survived\|died&creator=` |
+| GET | `/markets/:market` | none | view + shielded address |
+| GET | `/markets/:market/commitments` | none | public audit log: bettor, commitment, stakeCommitment, signature, committedTs; side and salt only after reveal |
+| POST | `/bets/commit` | bettor sig | `{market, bettor, commitment, stakeCommitment, signature}` |
+| POST | `/stakes/claim` | salt2 | `{market, bettor, amount, salt2, ringsTxSignature}` (425 = retry, 422 = mismatch) |
+| POST | `/bets/reveal` | bettor sig | `{market, bettor, side, salt, signature}` |
+| GET | `/portfolio/:wallet` | none | `{wallet, bets:[{...commitment, revealed, side, stakeVerified, payout, payoutStatus unpaid\|pending\|paid\|forfeited, payoutSignature}], launches:[view + bond]}` |
+| GET | `/creators` | none | `{creators:[{creator, launches, survived, died, live, survivalRate}]}` |
+| GET | `/stats` | none | counts, settled volume, paid out |
+| POST | `/claims/build` | bettor sig over `stovia-claim:${market}` | `{market, bettor, shieldedAddress?, signature}` → `{amount, mode transfer\|withdraw, feePayer, transaction (base64 unsigned), lastValidBlockHeight, cached}` |
+| POST | `/claims/submitted` | tx sig must match the built tx | `{market, bettor, signature}` → 200 `paid` / 202 `submitted\|failed` |
+
+Market view fields: `market, pool, mint, name, symbol, uri, creator, targetMcapLamports, deadlineTs, revealEndsTs, createdTs, status (open|revealing|survived|died), phase, currentMcapLamports, lastSampleTs, twapMcapLamports, twapSamples, migrated, commitments, revealed, bondPosted, totals` (null until settled; then `survivePool, diePool, bond, bondToWinners, bondRefund, totalPayout, payoutCount, payoutRoot, settledTs, claimsCloseTs`). All u64 values are decimal strings.
+
+## Legacy (program-based) design
+
+The sections below describe the earlier design: a Stovia program with `commit_sealed_bet` / `post_sealed_results`, plus company-paid payouts. The program-reading code (`chain.getMarket/getSealedBet`, `idl.js`, `post_results`/`payout` admin action kinds) is still present but **unused** by the market flow. The trust model, key handling, admin auth and the action lifecycle still apply. The admin queue now carries only `sweep` actions.
 
 ## Two kinds of keys
 
@@ -112,7 +159,7 @@ See `.env.example`.
 
 - **Secrets:** `RESOLVER_MASTER_SEED` (32-byte hex) and `HELIUS_API_KEY`. There is **no Solana signer secret.**
 - **Storage:** `DATABASE_URL` (Postgres; a single table `resolver_docs` is auto-created). Without it the service runs in memory, which is dev only.
-- **Behaviour:** `RESOLVER_SEND_ENABLED` (default `false`; when true, admin actions are created).
+- **Behaviour:** `RESOLVER_SEND_ENABLED` (default `false`; when true, treasury-sweep admin actions are created; claims never depend on it). `DBC_PROGRAM_ID` override.
 - **Optional:** `COMPANY_WALLET` override.
 
 Secrets are removed from `process.env` after they are loaded. They are never logged or returned. Request bodies are redacted from logs.
@@ -121,7 +168,8 @@ Secrets are removed from `process.env` after they are loaded. They are never log
 
 ```bash
 npm install
-npm test                                # offline: 21 tests
+npm test                                # offline: 29 tests
+npm run check:dbc [pool]                # read-only: decode a live DBC pool + mcap
 HELIUS_API_KEY=... npm run check:live   # read-only mainnet checks; sends nothing
 RESOLVER_MASTER_SEED=$(openssl rand -hex 32) npm start
 ```
@@ -135,6 +183,14 @@ The IDL is copied into `idl/stovia.json` because this service must not read `../
 - Add Postgres and set its URL as `DATABASE_URL`.
 
 ## Known gaps and risks
+
+- **Custody.** The master seed controls every market's stakes until they are paid. There is no on-chain escrow. The settlement outcome, the commitments and the payout rules are enforced by this code. They are publicly auditable (signed commitments, reveals, payout root, TWAP inputs from chain), but nothing on-chain enforces them.
+- **Mcap manipulation.** The TWAP over the whole market life dilutes short spikes. But a creator or whale can buy the curve up and hold it (buys add real SOL to the pool, so this costs money and is exposed to sells). Supply is the full mint supply, including curve-locked tokens, as DBC and the launchpads do. DBC price manipulation by wash trading costs fees. Large bets vs thin curves are the main risk; cap bet size relative to curve liquidity before real volume.
+- **Migration.** After graduation the held DBC price is used. The real DAMM price may diverge.
+- **Bettor-paid claims are unverified live.** Building a Rings transfer/withdrawal whose fee payer differs from the shielded owner (the winner as fee payer) is not verified, and neither is the history-row `direction`/`kind` for withdrawals.
+- **Public portfolio.** `GET /portfolio/:wallet` shows payout amounts after settlement (no auth), which reveals stake sizes for winners.
+- **Slot liveness.** One in-flight claim per market. A winner who builds and never signs blocks others for about 2 minutes (blockhash expiry + margin).
+
 
 - **SDK pinned at `@heliuslabs/spr@0.9.0-alpha`, endpoints in beta.**
   - Verified live (read-only): indexer wallet sync for a derived identity; Rings txs are v1; the bettor-signer check on a real Rings tx; an unsigned `post_sealed_results` built with a live blockhash has exactly one empty signer slot, the company wallet.

@@ -1,6 +1,7 @@
 // Helius Privacy Rings (SPR 0.9.0-alpha) access for market shielded identities.
-// Mirrors packages/rings/src/index.ts. The fee payer is the company wallet (signs in the browser);
-// the market identity authorizes spends inside the proof. Builders return compiled UNSIGNED txs.
+// Mirrors packages/rings/src/index.ts. The fee payer is whoever signs: the winner for payout claims
+// (POST /claims/build), the company wallet for treasury sweeps. The market identity authorizes spends
+// inside the proof. Builders return compiled UNSIGNED txs.
 import {
   SOL_MINT,
   ShieldedAddress,
@@ -88,6 +89,14 @@ export async function createRings({ rpcUrl, indexerUrl, proverUrl }) {
       .map((tx) => ({ kind: tx.kind, amount: tx.amount }));
   }
 
+  /** Every outbound SOL row of the market identity: [{signature, kind, amount}] (claim-slot reconciliation). */
+  async function outboundAll(identity) {
+    const w = await synced(identity);
+    return getPrivateTransactions(w)
+      .filter((tx) => tx.direction === "outbound" && tx.asset === SOL_MINT)
+      .map((tx) => ({ signature: tx.id.signature, kind: tx.kind, amount: tx.amount }));
+  }
+
   async function balance(identity) {
     const w = await synced(identity);
     return getPrivateTokenBalances(w).find((b) => b.mint === SOL_MINT)?.amount ?? 0n;
@@ -128,5 +137,5 @@ export async function createRings({ rpcUrl, indexerUrl, proverUrl }) {
     });
   }
 
-  return { client, receivedInTx, outboundInTx, balance, buildPayout, buildWithdraw };
+  return { client, receivedInTx, outboundInTx, outboundAll, balance, buildPayout, buildWithdraw };
 }

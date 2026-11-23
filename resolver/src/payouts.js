@@ -8,15 +8,20 @@
 //
 // Winner payout = stake + floor(stake * losing_pool / winning_pool)  (pro-rata, rounding down;
 // the dust remains in the market identity and is swept with the remainder).
-// If nobody valid is on the winning side, valid revealed losers are refunded their stake
-// (mirrors the public program's claim_winnings rule). The market bond never enters this path.
+// If nobody valid is on the winning side, valid revealed losers are refunded their stake.
+//
+// Creator bond (optional, verified Rings transfer by the creator):
+//   survived -> refunded to the creator (added to the creator's payout entry, bondRefund field);
+//   died     -> added to the losing pool that NO winners share:
+//               payout = stake + floor(stake * (losing + bond) / winning);
+//   died with no valid NO winners -> the bond stays in the market identity and is swept to treasury.
 import { buildPayoutTree } from "./crypto.js";
 
 export const SIDE_SURVIVE = 1;
 export const SIDE_DIE = 2;
 
 /**
- * @param {{survived: boolean}} market
+ * @param {{survived: boolean, bond?: bigint, creator?: string}} market
  * @param {{bettor: string, amount: bigint, verified: boolean, revealed: boolean, side: number}[]} stakes
  */
 export function computeSettlement(market, stakes) {
@@ -38,19 +43,31 @@ export function computeSettlement(market, stakes) {
     if (s.side === SIDE_SURVIVE) yesTotal += amount;
     else noTotal += amount;
   }
+  const bond = BigInt(market.bond ?? 0n);
   const winPool = winningSide === SIDE_SURVIVE ? yesTotal : noTotal;
   const losePool = winningSide === SIDE_SURVIVE ? noTotal : yesTotal;
+  const bondToWinners = !market.survived && winPool > 0n ? bond : 0n;
+  const bondRefund = market.survived ? bond : 0n;
 
   const payouts = [];
   if (winPool === 0n) {
-    for (const v of valid) payouts.push({ bettor: v.bettor, amount: v.amount, refund: true });
+    for (const v of valid) payouts.push({ bettor: v.bettor, amount: v.amount, refund: true, stake: v.amount, bondRefund: 0n });
   } else {
     for (const v of valid) {
       if (v.side !== winningSide) continue;
-      payouts.push({ bettor: v.bettor, amount: v.amount + (v.amount * losePool) / winPool, refund: false });
+      payouts.push({ bettor: v.bettor, amount: v.amount + (v.amount * (losePool + bondToWinners)) / winPool, refund: false, stake: v.amount, bondRefund: 0n });
     }
+  }
+  if (bondRefund > 0n) {
+    if (!market.creator) throw new Error("bond refund needs market.creator");
+    const mine = payouts.find((p) => p.bettor === market.creator);
+    if (mine) {
+      mine.amount += bondRefund;
+      mine.bondRefund = bondRefund;
+    } else payouts.push({ bettor: market.creator, amount: bondRefund, refund: false, stake: 0n, bondRefund });
   }
   const totalPaid = payouts.reduce((a, p) => a + p.amount, 0n);
   const tree = buildPayoutTree(payouts);
-  return { winningSide, yesTotal, noTotal, payouts, totalPaid, excludedVerified: excluded, root: tree.root, tree };
+  const bondToTreasury = bond - bondToWinners - bondRefund;
+  return { winningSide, yesTotal, noTotal, bond, bondToWinners, bondRefund, bondToTreasury, payouts, totalPaid, excludedVerified: excluded, root: tree.root, tree };
 }

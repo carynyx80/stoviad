@@ -2,7 +2,7 @@
   "name": "stovia-resolver",
   "version": "0.1.0",
   "private": true,
-  "description": "Stovia sealed-bet resolver: market shielded identities, stake verification and private payouts via Helius Privacy Rings",
+  "description": "Stovia survival-market resolver: Meteora DBC launches, off-chain signed bet commitments, TWAP mcap settlement, private stakes and payouts via Helius Privacy Rings",
   "type": "module",
   "main": "src/index.js",
   "engines": {
@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test test/*.test.js",
-    "check:live": "node scripts/live-check.js"
+    "check:live": "node scripts/live-check.js",
+    "check:dbc": "node scripts/live-dbc.js"
   },
   "dependencies": {
     "@heliuslabs/spr": "0.9.0-alpha",

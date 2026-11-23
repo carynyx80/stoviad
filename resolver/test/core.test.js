@@ -108,7 +108,7 @@ test("payout math: rounding down never exceeds the pool", () => {
 
 test("payout math: empty winning side refunds valid losers", () => {
   const s = computeSettlement({ survived: true }, [{ bettor: B[0], amount: 5n, verified: true, revealed: true, side: SIDE_DIE }]);
-  assert.deepEqual(s.payouts, [{ bettor: B[0], amount: 5n, refund: true }]);
+  assert.deepEqual(s.payouts, [{ bettor: B[0], amount: 5n, refund: true, stake: 5n, bondRefund: 0n }]);
 });
 
 test("Merkle root + proofs verify for every leaf; tampering fails", () => {

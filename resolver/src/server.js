@@ -5,6 +5,8 @@ import { address } from "@solana/kit";
 import { claimStake, parseClaim, registerPayoutAddress, verifyWalletSignature, resultsAccessMessage, HttpError } from "./claims.js";
 import { buildPayoutTree, payoutProof, bytesToHex } from "./crypto.js";
 import { parseActionSubmit } from "./actions.js";
+import { createLaunch, commitBet, revealBet, postBond, listMarkets, getMarketView, listCommitments, portfolio, creatorsLeaderboard, stats } from "./markets.js";
+import { buildClaim, submitClaim } from "./payoutclaims.js";
 
 export function buildServer(deps) {
   const { store, identities, config } = deps;
@@ -46,29 +48,57 @@ export function buildServer(deps) {
     service: "stovia-resolver",
     store: config.databaseUrl ? "postgres" : "memory",
     sendEnabled: !!config.sendEnabled,
-    companyWallet: config.companyWallet, // fee payer / Config.resolver; resolver never holds its key
+    companyWallet: config.companyWallet, // treasury + admin-queue signer; resolver never holds its key
     ringsReady: !!deps.rings,
+    dbcReady: !!deps.dbc,
   }));
+
+  // ---------------------------------------------------------------------------
+  // Survival markets (no on-chain program): launches, bets, bonds, claims, views
+  // ---------------------------------------------------------------------------
+  const needRings = () => {
+    if (!deps.rings || !deps.chain) throw new HttpError(503, "not_configured", "HELIUS_API_KEY not configured");
+  };
+
+  app.post("/launches", async (req, reply) => {
+    const r = await createLaunch(req.body, deps);
+    return reply.code(r.idempotent ? 200 : 201).send(json(r));
+  });
+  app.post("/launches/:market/bond", async (req, reply) => {
+    needRings();
+    const r = await postBond(req.params.market, req.body, deps);
+    return reply.code(r.idempotent ? 200 : 201).send(json(r));
+  });
+  app.get("/markets", async (req) => json({ markets: await listMarkets(deps, { status: req.query.status, creator: req.query.creator }) }));
+  app.get("/markets/:market", async (req) => json(await getMarketView(req.params.market, deps)));
+  app.get("/markets/:market/commitments", async (req) => json(await listCommitments(pk(req.params.market, "market"), deps)));
+  app.post("/bets/commit", async (req, reply) => {
+    const r = await commitBet(req.body, deps);
+    return reply.code(r.idempotent ? 200 : 201).send(json(r));
+  });
+  app.post("/bets/reveal", async (req) => json(await revealBet(req.body, deps)));
+  app.get("/portfolio/:wallet", async (req) => json(await portfolio(req.params.wallet, deps)));
+  app.get("/creators", async () => json({ creators: await creatorsLeaderboard(deps) }));
+  app.get("/stats", async () => json(await stats(deps)));
+  app.post("/claims/build", async (req) => {
+    needRings();
+    return json(await buildClaim(req.body, { ...deps, ShieldedAddress }));
+  });
+  app.post("/claims/submitted", async (req, reply) => {
+    needRings();
+    const r = await submitClaim(req.body, deps);
+    return reply.code(r.status === "paid" ? 200 : 202).send(json(r));
+  });
 
   app.get("/markets/:market/shielded-address", async (req) => {
     const market = pk(req.params.market, "market");
     const info = await identities.publicInfo(market);
-    // Only track real Stovia market accounts (sweep even if nobody claims); arbitrary
-    // addresses get their deterministic address but never enter the worker's queue.
-    let tracked = false;
-    if (deps.chain) {
-      try {
-        if (await deps.chain.getMarket(market)) {
-          await store.insertIfAbsent("tracked", market, { since: Date.now() });
-          tracked = true;
-        }
-      } catch { /* not a Stovia market (or program not deployed yet) */ }
-    }
-    return { ...info, tracked };
+    // Markets are tracked from POST /launches; any address still gets its deterministic identity.
+    return { ...info, tracked: !!(await store.get("market", market)) };
   });
 
   app.post("/stakes/claim", async (req, reply) => {
-    if (!deps.rings || !deps.chain) throw new HttpError(503, "not_configured", "HELIUS_API_KEY not configured");
+    needRings();
     const res = await claimStake(parseClaim(req.body), deps);
     return reply.code(res.idempotent ? 200 : 201).send(res);
   });
@@ -113,27 +143,27 @@ export function buildServer(deps) {
     return { actionId: p.id, ...r };
   });
 
-  // Public: totals and root are posted on-chain anyway. Individual payouts are NOT listed here.
+  // Public settlement summary (totals are public after settlement). Individual payouts are NOT listed here.
   app.get("/markets/:market/results", async (req) => {
     const market = pk(req.params.market, "market");
     const st = await store.get("market", market);
-    if (!st) return { market, state: "open" };
-    const post = await store.get("action", `post_results:${market}`);
+    if (!st) throw new HttpError(404, "unknown_market", "no such market");
     return json({
       market,
-      state: st.state,
-      survived: st.survived,
-      yesTotal: st.yesTotal,
-      noTotal: st.noTotal,
-      payoutRoot: st.rootHex,
-      payoutCount: st.payoutCount,
-      postSignature: post?.signature ?? null,
-      postConfirmed: post?.status === "confirmed",
-      haltReason: st.haltReason,
+      phase: st.phase,
+      outcome: st.outcome ?? null,
+      twapFinal: st.twapFinal ?? null,
+      targetMcapLamports: st.targetMcapLamports,
+      survivePool: st.yesTotal ?? null,
+      diePool: st.noTotal ?? null,
+      payoutRoot: st.rootHex ?? null,
+      payoutCount: st.payoutCount ?? null,
+      claimsCloseTs: st.claimsCloseTs ?? null,
+      haltReason: st.haltReason ?? null,
     });
   });
 
-  // Bettor-only: own payout amount + Merkle proof. Auth: Ed25519 signature over resultsAccessMessage.
+  // Bettor-only: own payout amount + Merkle proof against the published payoutRoot.
   app.get("/markets/:market/payouts/:bettor", async (req) => {
     const market = pk(req.params.market, "market");
     const bettor = pk(req.params.bettor, "bettor");
@@ -146,14 +176,14 @@ export function buildServer(deps) {
     const mine = all.find((p) => p.bettor === bettor);
     if (!mine) return { market, bettor, payout: "0", proof: [] };
     const tree = buildPayoutTree(all.map((p) => ({ bettor: p.bettor, amount: p.amount })));
-    const send = await store.get("action", `payout:${market}:${bettor}`);
     return json({
       market,
       bettor,
       payout: mine.amount,
       refund: mine.refund,
+      bondRefund: mine.bondRefund ?? 0n,
       status: mine.status,
-      signature: send?.signature ?? null,
+      signature: mine.paidSignature ?? null,
       payoutRoot: st.rootHex,
       proof: payoutProof(tree, bettor).map(bytesToHex),
     });

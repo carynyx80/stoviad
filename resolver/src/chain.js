@@ -1,4 +1,5 @@
-// Solana RPC access. Read-only: the resolver builds UNSIGNED transactions and never signs or sends.
+// Solana RPC access. The Stovia-program helpers (getMarket/getSealedBet/post_sealed_results) are LEGACY:
+// the program is not deployed and the market flow no longer calls them. Read-only: the resolver builds UNSIGNED transactions and never signs or sends.
 // Uses plain JSON-RPC over fetch so the API key stays in one place.
 import {
   AccountRole,
@@ -40,6 +41,14 @@ export class Chain {
     return j.result;
   }
 
+  /** Raw account (any owner): { owner, lamports, data } or null. */
+  async getAccountInfo(addr) {
+    const r = await this.rpc("getAccountInfo", [addr, { encoding: "base64", commitment: "confirmed" }]);
+    if (!r?.value) return null;
+    return { owner: r.value.owner, lamports: BigInt(r.value.lamports), data: new Uint8Array(Buffer.from(r.value.data[0], "base64")) };
+  }
+
+  /** LEGACY (Stovia program, not deployed): owner-checked account data. */
   async getAccountData(addr) {
     const r = await this.rpc("getAccountInfo", [addr, { encoding: "base64", commitment: "confirmed" }]);
     if (!r?.value) return null;
@@ -93,9 +102,10 @@ export class Chain {
       { encoding: "base64", commitment: "confirmed", maxSupportedTransactionVersion: this.maxTxVersion },
     ]);
     if (!tx) return { found: false, signed: false };
-    if (tx.meta?.err) return { found: true, signed: false, failed: true };
+    const blockTime = tx.blockTime ?? null; // unix seconds (used to enforce "staked before deadline")
+    if (tx.meta?.err) return { found: true, signed: false, failed: true, blockTime };
     const decoded = getTransactionDecoder().decode(Buffer.from(tx.transaction[0], "base64"));
-    return { found: true, signed: Object.prototype.hasOwnProperty.call(decoded.signatures, bettor), failed: false };
+    return { found: true, signed: Object.prototype.hasOwnProperty.call(decoded.signatures, bettor), failed: false, blockTime };
   }
 
   async getBlockHeight() {

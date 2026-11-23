@@ -1,4 +1,4 @@
-// Stake claims and payout-address registration. Dependencies are injected so tests can run offline.
+// Stake claims (checked against off-chain signed commitments) and payout-address registration. Dependencies are injected so tests can run offline.
 import { address, getPublicKeyFromAddress, verifySignature, getBase58Encoder } from "@solana/kit";
 import { bytesEqual, bytesToHex, hexToBytes, stakeCommitment } from "./crypto.js";
 
@@ -10,7 +10,8 @@ export class HttpError extends Error {
   }
 }
 
-const FROZEN_STATES = new Set(["computing", "computed", "results_posted", "paying", "sweeping", "done"]);
+// Market phases after which no stake can be registered (results are being / have been computed).
+const FROZEN_PHASES = new Set(["settled", "sweeping", "done", "halted"]);
 const SIG_RE = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 
 function parsePubkey(v, field) {
@@ -44,16 +45,20 @@ export function parseClaim(body) {
 }
 
 /**
- * Verify and record a sealed stake.
- * deps: { store, chain: {getSealedBet, txSignedBy}, rings: {receivedInTx}, identities: {get} }
+ * Verify and record a sealed stake against the bettor's OFF-CHAIN signed commitment (POST /bets/commit).
+ * deps: { store, chain: {txSignedBy}, rings: {receivedInTx}, identities: {get}, now?: () => ms }
+ * The Rings transfer must have landed (blockTime) at or before the market deadline: otherwise a bettor
+ * could commit, watch the market cap, and only fund the bet if it is winning (a free option).
  */
 export async function claimStake(input, deps) {
   const { store, chain, rings, identities } = deps;
+  const nowS = Math.floor((deps.now ?? Date.now)() / 1000);
   const { market, bettor, amount, salt2, ringsTxSignature } = input;
   const stakeId = `${market}:${bettor}`;
 
-  const mstate = await store.get("market", market);
-  if (mstate && FROZEN_STATES.has(mstate.state)) throw new HttpError(409, "market_frozen", "market results already computed; claim window closed");
+  const m = await store.get("market", market);
+  if (!m) throw new HttpError(404, "unknown_market", "no such market");
+  if (FROZEN_PHASES.has(m.phase) || nowS >= Number(m.revealEndsTs)) throw new HttpError(409, "market_frozen", "market results already computed; claim window closed");
 
   const existing = await store.get("stake", stakeId);
   if (existing?.verified) {
@@ -61,32 +66,21 @@ export async function claimStake(input, deps) {
     throw new HttpError(409, "already_claimed", "a verified stake already exists for this bettor and market");
   }
 
-  // 1) On-chain binding: sha256(amount || salt2 || bettor) == SealedBet.stake_commitment
-  const bet = await chain.getSealedBet(market, bettor);
-  if (!bet) throw new HttpError(404, "no_sealed_bet", "no SealedBet account for this bettor and market");
-  if (bet.bettor !== bettor || bet.market !== market) throw new HttpError(409, "bet_mismatch", "SealedBet account does not belong to this bettor/market");
-  if (!bytesEqual(stakeCommitment(amount, salt2, bettor), bet.stakeCommitment)) {
-    throw new HttpError(422, "commitment_mismatch", "sha256(amount||salt2||bettor) does not match on-chain stake_commitment");
+  // 1) Off-chain binding: sha256(amount || salt2 || bettor) == signed stakeCommitment
+  const bet = await store.get("bet", stakeId);
+  if (!bet) throw new HttpError(404, "no_commitment", "no bet commitment for this bettor and market (POST /bets/commit first)");
+  if (!bytesEqual(stakeCommitment(amount, salt2, bettor), hexToBytes(bet.stakeCommitment, 32))) {
+    throw new HttpError(422, "commitment_mismatch", "sha256(amount||salt2||bettor) does not match the committed stakeCommitment");
   }
 
-  // 2) Reserve the Rings tx signature so one transfer can back only one stake.
+  // 2) Reserve the Rings tx signature so one transfer can back only one stake (or bond).
   const reserved = await store.insertIfAbsent("txsig", ringsTxSignature, { stakeId, at: Date.now() });
   if (!reserved) {
     const owner = await store.get("txsig", ringsTxSignature);
     if (owner?.stakeId !== stakeId) throw new HttpError(409, "tx_already_used", "this Rings transaction already backs another stake");
   }
   try {
-    // 3) The sender of a default-ring transfer is public: the bettor must have signed it.
-    const signed = await chain.txSignedBy(ringsTxSignature, bettor);
-    if (!signed.found) throw new HttpError(425, "tx_not_found", "transaction not found yet; retry shortly");
-    if (signed.failed) throw new HttpError(422, "tx_failed", "transaction failed on-chain");
-    if (!signed.signed) throw new HttpError(422, "not_bettor_tx", "bettor did not sign this transaction");
-
-    // 4) The market identity must have received exactly `amount` lamports in that tx (decrypted locally).
-    const identity = await identities.get(market);
-    const got = await rings.receivedInTx(identity, ringsTxSignature);
-    if (got.rows === 0) throw new HttpError(425, "note_not_indexed", "no shielded SOL note to this market in that transaction (yet); retry shortly");
-    if (got.amount !== amount) throw new HttpError(422, "amount_mismatch", "shielded amount received does not match the claimed amount");
+    await verifyRingsDeposit({ chain, rings, identities, market, sender: bettor, amount, ringsTxSignature, deadlineTs: m.deadlineTs });
   } catch (e) {
     if (reserved) await store.del("txsig", ringsTxSignature); // allow a retry after indexer lag
     throw e;
@@ -97,7 +91,7 @@ export async function claimStake(input, deps) {
     bettor,
     amount,
     ringsTxSignature,
-    stakeCommitmentHex: bytesToHex(bet.stakeCommitment),
+    stakeCommitmentHex: bet.stakeCommitment,
     verified: true,
     verifiedAt: new Date().toISOString(),
   };
@@ -107,8 +101,23 @@ export async function claimStake(input, deps) {
     if (other?.ringsTxSignature === ringsTxSignature) return { ...publicStake(other), idempotent: true };
     throw new HttpError(409, "already_claimed", "a verified stake already exists for this bettor and market");
   }
-  await store.insertIfAbsent("tracked", market, { since: Date.now() });
   return publicStake(doc);
+}
+
+/** Shared by stakes and creator bonds: sender signed the tx, it landed by the deadline, market identity received exactly `amount`. */
+export async function verifyRingsDeposit({ chain, rings, identities, market, sender, amount, ringsTxSignature, deadlineTs }) {
+  // The sender of a default-ring transfer is public: the sender must have signed it.
+  const signed = await chain.txSignedBy(ringsTxSignature, sender);
+  if (!signed.found) throw new HttpError(425, "tx_not_found", "transaction not found yet; retry shortly");
+  if (signed.failed) throw new HttpError(422, "tx_failed", "transaction failed on-chain");
+  if (!signed.signed) throw new HttpError(422, "not_sender_tx", "the wallet did not sign this transaction");
+  if (signed.blockTime == null) throw new HttpError(425, "tx_no_blocktime", "transaction block time not available yet; retry shortly");
+  if (Number(signed.blockTime) > Number(deadlineTs)) throw new HttpError(422, "tx_after_deadline", "the Rings transfer landed after the market deadline");
+  // The market identity must have received exactly `amount` lamports in that tx (decrypted locally).
+  const identity = await identities.get(market);
+  const got = await rings.receivedInTx(identity, ringsTxSignature);
+  if (got.rows === 0) throw new HttpError(425, "note_not_indexed", "no shielded SOL note to this market in that transaction (yet); retry shortly");
+  if (got.amount !== amount) throw new HttpError(422, "amount_mismatch", "shielded amount received does not match the claimed amount");
 }
 
 const publicStake = (d) => ({ market: d.market, bettor: d.bettor, verified: d.verified, ringsTxSignature: d.ringsTxSignature });
