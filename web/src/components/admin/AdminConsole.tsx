@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { StoviaLogo } from "@/components/brand/StoviaLogo";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { ShieldAlert, ShieldCheck, Wallet } from "lucide-react";
@@ -10,6 +11,7 @@ import { COMPANY_WALLET } from "@/lib/admin/anchor";
 import { shortAddr } from "@/lib/format";
 import { ProgramPanel } from "./ProgramPanel";
 import { ResolverQueue } from "./ResolverQueue";
+import { DbcConfigPanel } from "./DbcConfigPanel";
 
 export function AdminConsole() {
   return (
@@ -20,7 +22,7 @@ export function AdminConsole() {
           <ShieldAlert className="h-3.5 w-3.5 text-blood-hot" aria-hidden /> Admin
         </span>
         <Link href="/" className="font-display text-base font-extrabold tracking-tight text-bone">
-          STOVIA<span className="text-gold">.</span>
+          <StoviaLogo markClassName="h-6 w-6" textClassName="text-[22px]" />
         </Link>
       </header>
       <div className="relative z-10 mx-auto max-w-[1400px] px-4 pb-16 pt-10 sm:px-8 sm:pt-14">
@@ -69,6 +71,7 @@ function Gate() {
       <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-gold">
         <ShieldCheck className="h-4 w-4" aria-hidden /> Company wallet verified · {shortAddr(COMPANY_WALLET.toBase58(), 6, 6)}
       </p>
+      <DbcConfigPanel />
       <ProgramPanel />
       <ResolverQueue />
     </div>
