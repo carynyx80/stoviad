@@ -21,7 +21,7 @@ export const SECTIONS: Section[] = [
     label: "Launch a token",
     title: "Launch",
     accent: "something brave.",
-    pitch: "Mint a memecoin, post a bond, set a target. The market decides if it lives.",
+    pitch: "Mint a memecoin on a bonding curve, set a survival target. The market decides if it lives.",
     cta: "Open launchpad",
     tone: "gold",
     tag: "Create",
