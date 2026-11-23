@@ -53,8 +53,18 @@ export function buildServer(deps) {
   app.get("/markets/:market/shielded-address", async (req) => {
     const market = pk(req.params.market, "market");
     const info = await identities.publicInfo(market);
-    await store.insertIfAbsent("tracked", market, { since: Date.now() }); // sweep even if nobody claims
-    return info;
+    // Only track real Stovia market accounts (sweep even if nobody claims); arbitrary
+    // addresses get their deterministic address but never enter the worker's queue.
+    let tracked = false;
+    if (deps.chain) {
+      try {
+        if (await deps.chain.getMarket(market)) {
+          await store.insertIfAbsent("tracked", market, { since: Date.now() });
+          tracked = true;
+        }
+      } catch { /* not a Stovia market (or program not deployed yet) */ }
+    }
+    return { ...info, tracked };
   });
 
   app.post("/stakes/claim", async (req, reply) => {
