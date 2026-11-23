@@ -1,0 +1,23 @@
+{
+  "name": "stovia-resolver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stovia sealed-bet resolver: market shielded identities, stake verification and private payouts via Helius Privacy Rings",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "check:live": "node scripts/live-check.js"
+  },
+  "dependencies": {
+    "@heliuslabs/spr": "0.9.0-alpha",
+    "@solana/kit": "8.6.0",
+    "fastify": "^5.6.0",
+    "pg": "^8.16.0",
+    "tweetnacl": "^1.0.3"
+  }
+}
