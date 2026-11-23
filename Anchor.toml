@@ -13,7 +13,10 @@ stovia = "6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8"
 
 [provider]
 cluster = "mainnet"
-wallet = "~/.config/solana/id.json"
+# Company wallet 3aeVzSa3XKR8vstMFkXzVCnokcC4LApQPH3S8G7ckLgm (fee payer, upgrade authority, admin,
+# treasury, resolver). Keypair file lives on the signer's machine only, never in this repo.
+# scripts/deploy-mainnet.sh takes the signer explicitly via --keypair and does not read this.
+wallet = "~/.config/solana/stovia-company.json"
 
 [scripts]
 test = "cargo build-sbf --manifest-path programs/stovia/Cargo.toml --arch v0 --sbf-out-dir target/deploy-v0 && cargo test --manifest-path tests/Cargo.toml -- --nocapture"

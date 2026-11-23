@@ -3,6 +3,8 @@
   "network": "mainnet-beta",
   "programId": "6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8",
   "companyWallet": "3aeVzSa3XKR8vstMFkXzVCnokcC4LApQPH3S8G7ckLgm",
+  "admin": "3aeVzSa3XKR8vstMFkXzVCnokcC4LApQPH3S8G7ckLgm",
+  "resolver": "3aeVzSa3XKR8vstMFkXzVCnokcC4LApQPH3S8G7ckLgm",
   "platformFeeBps": 10,
   "creatorFeeBps": 10,
   "privacyRings": {
