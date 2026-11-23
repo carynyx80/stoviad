@@ -1,86 +1,17 @@
 //! litesvm end-to-end: init -> launch -> buy -> sell (fee routing) -> creator fees ->
 //! commit/reveal -> settle (DIED) -> claim/sweep. Loads target/deploy/stovia.so.
-use borsh::BorshSerialize;
-use litesvm::LiteSVM;
-use sha2::{Digest, Sha256};
+mod common;
+use common::*;
 use solana_sdk::{
-    account::Account,
     bpf_loader_upgradeable,
-    clock::Clock,
-    instruction::{AccountMeta, Instruction},
+    instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     system_program, sysvar,
     transaction::Transaction,
 };
-use std::str::FromStr;
-
-const SOL: u64 = 1_000_000_000;
-
-fn pid() -> Pubkey {
-    Pubkey::from_str("6f54qVP1zv9F36A5Cxj9ogzm5DSVY1pQFndZWTwcVL8").unwrap()
-}
-fn disc(name: &str) -> Vec<u8> {
-    Sha256::digest(format!("global:{name}").as_bytes())[..8].to_vec()
-}
-fn ix(name: &str, args: impl BorshSerialize, accounts: Vec<AccountMeta>) -> Instruction {
-    let mut data = disc(name);
-    args.serialize(&mut data).unwrap();
-    Instruction { program_id: pid(), accounts, data }
-}
-fn pda(seeds: &[&[u8]]) -> Pubkey {
-    Pubkey::find_program_address(seeds, &pid()).0
-}
-fn w(k: Pubkey) -> AccountMeta {
-    AccountMeta::new(k, false)
-}
-fn r(k: Pubkey) -> AccountMeta {
-    AccountMeta::new_readonly(k, false)
-}
-fn send(svm: &mut LiteSVM, ixs: &[Instruction], payer: &Keypair, extra: &[&Keypair]) {
-    let mut signers: Vec<&Keypair> = vec![payer];
-    signers.extend_from_slice(extra);
-    let tx = Transaction::new_signed_with_payer(ixs, Some(&payer.pubkey()), &signers, svm.latest_blockhash());
-    match svm.send_transaction(tx) {
-        Ok(_) => {}
-        Err(e) => panic!("tx failed: {:?}\nlogs:\n{}", e.err, e.meta.logs.join("\n")),
-    }
-    svm.expire_blockhash();
-}
-fn bal(svm: &LiteSVM, k: &Pubkey) -> u64 {
-    svm.get_balance(k).unwrap_or(0)
-}
-fn token_amount(svm: &LiteSVM, k: &Pubkey) -> u64 {
-    let a = svm.get_account(k).unwrap();
-    u64::from_le_bytes(a.data[64..72].try_into().unwrap())
-}
-fn set_time(svm: &mut LiteSVM, ts: i64) {
-    let mut c: Clock = svm.get_sysvar();
-    c.unix_timestamp = ts;
-    c.slot += 1;
-    svm.set_sysvar(&c);
-}
-
-/// Deploy as an upgradeable program so initialize_config's upgrade-authority gate works.
-fn deploy(svm: &mut LiteSVM, authority: &Pubkey) {
-    // litesvm 0.6 (agave 2.2 runtime) only loads SBPF v0-v2; build with
-    // `cargo build-sbf --arch v0 --sbf-out-dir target/deploy-v0`, or point STOVIA_SO at a .so.
-    let path = std::env::var("STOVIA_SO")
-        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../target/deploy-v0/stovia.so").to_string());
-    let elf = std::fs::read(&path).expect("missing program .so (see comment)");
-    let (pd, _) = Pubkey::find_program_address(&[pid().as_ref()], &bpf_loader_upgradeable::id());
-    let mut pd_data = vec![3u8, 0, 0, 0];
-    pd_data.extend_from_slice(&0u64.to_le_bytes());
-    pd_data.push(1);
-    pd_data.extend_from_slice(authority.as_ref());
-    pd_data.extend_from_slice(&elf);
-    svm.set_account(pd, Account { lamports: 10 * SOL, data: pd_data, owner: bpf_loader_upgradeable::id(), executable: false, rent_epoch: 0 })
-        .unwrap();
-    let mut p_data = vec![2u8, 0, 0, 0];
-    p_data.extend_from_slice(pd.as_ref());
-    svm.set_account(pid(), Account { lamports: SOL, data: p_data, owner: bpf_loader_upgradeable::id(), executable: true, rent_epoch: 0 })
-        .unwrap();
-}
+use litesvm::LiteSVM;
+use sha2::{Digest, Sha256};
 
 #[test]
 fn launch_buy_sell_and_market() {
@@ -109,7 +40,7 @@ fn launch_buy_sell_and_market() {
         &mut svm,
         &[ix(
             "initialize_config",
-            (treasury, 10u16, 10u16),
+            (treasury, 10u16, 10u16, None::<Pubkey>, Pubkey::default()),
             vec![
                 AccountMeta::new(admin.pubkey(), true),
                 w(config),

@@ -4,6 +4,14 @@
 //! accumulated on every trade) -> commit_bet (sealed side) before deadline -> reveal_bet in the
 //! reveal window -> settle_market (TWAP vs target) -> claim_winnings / claim_bond / sweep_unrevealed.
 //!
+//! Sealed bets (Helius Privacy Rings): commit_sealed_bet records side + stake commitments with no
+//! SOL escrow; the stake moves privately to a resolver-held shielded identity. reveal_sealed_bet
+//! reveals the side only. After settle_market the resolver posts aggregate sealed totals and a
+//! Merkle root of private payouts (post_sealed_results). Trust: the resolver custodies sealed
+//! stakes until Rings supports trustless PDA escrow (see docs/privacy-rings.md).
+//!
+//! Admin handoff is two-step: propose_admin (admin) -> accept_admin (nominee signs).
+//!
 //! SOL vaults are zero-field program-owned PDAs (`SolVault`). Deposits use system transfers,
 //! withdrawals debit lamports directly; vaults never go below their rent-exempt floor because
 //! every withdrawal is bounded by an accounting field that excludes the rent deposit.
@@ -41,6 +49,8 @@ pub mod stovia {
         treasury: Pubkey,
         platform_fee_bps: u16,
         creator_fee_bps: u16,
+        pending_admin: Option<Pubkey>,
+        resolver: Pubkey,
     ) -> Result<()> {
         require!(
             platform_fee_bps <= MAX_FEE_BPS && creator_fee_bps <= MAX_FEE_BPS,
@@ -53,6 +63,42 @@ pub mod stovia {
         c.creator_fee_bps = creator_fee_bps;
         c.launch_count = 0;
         c.bump = ctx.bumps.config;
+        c.pending_admin = pending_admin;
+        c.resolver = resolver;
+        if let Some(p) = pending_admin {
+            emit!(AdminProposed { admin: c.admin, pending_admin: p });
+        }
+        Ok(())
+    }
+
+    /// Admin-only, step 1 of 2: nominate a new admin. Overwrites any earlier nomination;
+    /// proposing `Pubkey::default()` is rejected (use a real key, or re-propose yourself to cancel).
+    pub fn propose_admin(ctx: Context<UpdateConfig>, new_admin: Pubkey) -> Result<()> {
+        require!(new_admin != Pubkey::default(), StoviaError::InvalidAdmin);
+        let c = &mut ctx.accounts.config;
+        c.pending_admin = Some(new_admin);
+        emit!(AdminProposed { admin: c.admin, pending_admin: new_admin });
+        Ok(())
+    }
+
+    /// Step 2 of 2: the nominated key signs to become admin.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        let new_admin = ctx.accounts.new_admin.key();
+        require!(c.pending_admin == Some(new_admin), StoviaError::Unauthorized);
+        let previous_admin = c.admin;
+        c.admin = new_admin;
+        c.pending_admin = None;
+        emit!(AdminAccepted { previous_admin, new_admin });
+        Ok(())
+    }
+
+    /// Admin-only: rotate the sealed-bet resolver key.
+    pub fn set_resolver(ctx: Context<UpdateConfig>, resolver: Pubkey) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        let previous = c.resolver;
+        c.resolver = resolver;
+        emit!(ResolverUpdated { previous, resolver });
         Ok(())
     }
 
@@ -155,6 +201,8 @@ pub mod stovia {
         m.status = MarketStatus::Open;
         m.twap_mcap = 0;
         m.swept = false;
+        m.sealed_committed = 0;
+        m.sealed_revealed = 0;
 
         emit!(LaunchCreated {
             launch: launch.key(),
@@ -506,6 +554,98 @@ pub mod stovia {
         });
         Ok(())
     }
+
+    // ------------------------------------------------ sealed (Privacy Rings) bets
+    //
+    // The stake itself moves privately via a Helius Privacy Rings transfer to the market's
+    // resolver-held shielded identity; nothing but rent is paid to this program.
+    // commitment       = sha256(side_u8 || salt[32] || bettor_pubkey)
+    // stake_commitment = sha256(amount_le_u64 || salt2[32] || bettor_pubkey)
+    // The amount is never revealed on-chain: the bettor discloses (amount, salt2) to the resolver
+    // only, who checks it against stake_commitment and the decrypted Rings UTXO.
+
+    pub fn commit_sealed_bet(
+        ctx: Context<CommitSealedBet>,
+        commitment: [u8; 32],
+        stake_commitment: [u8; 32],
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let market = &mut ctx.accounts.market;
+        require!(market.status == MarketStatus::Open, StoviaError::MarketNotOpen);
+        require!(now < market.deadline, StoviaError::BettingClosed);
+        market.sealed_committed = market.sealed_committed.checked_add(1).ok_or(StoviaError::MathOverflow)?;
+
+        let bet = &mut ctx.accounts.sealed_bet;
+        bet.market = market.key();
+        bet.bettor = ctx.accounts.bettor.key();
+        bet.commitment = commitment;
+        bet.stake_commitment = stake_commitment;
+        bet.side = 0;
+        bet.revealed = false;
+        bet.committed_at = now;
+        bet.bump = ctx.bumps.sealed_bet;
+        emit!(SealedBetCommitted {
+            market: bet.market,
+            bettor: bet.bettor,
+            commitment,
+            stake_commitment,
+            timestamp: now,
+        });
+        Ok(())
+    }
+
+    /// Reveals the side only; the amount stays private.
+    pub fn reveal_sealed_bet(ctx: Context<RevealSealedBet>, side: u8, salt: [u8; 32]) -> Result<()> {
+        require!(side == SIDE_SURVIVE || side == SIDE_DIE, StoviaError::InvalidSide);
+        let now = Clock::get()?.unix_timestamp;
+        let market = &mut ctx.accounts.market;
+        require!(now >= market.deadline, StoviaError::RevealNotStarted);
+        require!(now < market.reveal_end, StoviaError::RevealWindowClosed);
+        let bet = &mut ctx.accounts.sealed_bet;
+        require!(!bet.revealed, StoviaError::AlreadyRevealed);
+        let side_byte = [side];
+        let digest = hashv(&[&side_byte[..], &salt[..], bet.bettor.as_ref()]).to_bytes();
+        require!(digest == bet.commitment, StoviaError::CommitmentMismatch);
+        bet.revealed = true;
+        bet.side = side;
+        market.sealed_revealed = market.sealed_revealed.checked_add(1).ok_or(StoviaError::MathOverflow)?;
+        emit!(SealedBetRevealed { market: market.key(), bettor: bet.bettor, side });
+        Ok(())
+    }
+
+    /// Resolver-only, once per market, after settle_market. Publishes the aggregate sealed pool
+    /// totals and the Merkle root of private payouts the resolver will send via Rings.
+    pub fn post_sealed_results(
+        ctx: Context<PostSealedResults>,
+        yes_total: u64,
+        no_total: u64,
+        payout_root: [u8; 32],
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let market = &ctx.accounts.market;
+        require!(market.status != MarketStatus::Open, StoviaError::NotSettled);
+        let r = &mut ctx.accounts.sealed_results;
+        r.market = market.key();
+        r.resolver = ctx.accounts.resolver.key();
+        r.survived = market.status == MarketStatus::Survived;
+        r.yes_total = yes_total;
+        r.no_total = no_total;
+        r.payout_root = payout_root;
+        r.sealed_revealed = market.sealed_revealed;
+        r.posted_at = now;
+        r.bump = ctx.bumps.sealed_results;
+        emit!(SealedResultsPosted {
+            market: r.market,
+            resolver: r.resolver,
+            survived: r.survived,
+            yes_total,
+            no_total,
+            payout_root,
+            sealed_committed: market.sealed_committed,
+            sealed_revealed: market.sealed_revealed,
+        });
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------- helpers
@@ -586,6 +726,10 @@ pub struct Config {
     pub creator_fee_bps: u16,
     pub launch_count: u64,
     pub bump: u8,
+    /// Nominated admin awaiting `accept_admin`.
+    pub pending_admin: Option<Pubkey>,
+    /// Off-chain Stovia resolver for sealed (Privacy Rings) bets.
+    pub resolver: Pubkey,
 }
 
 #[account]
@@ -640,6 +784,38 @@ pub struct Market {
     pub bonus_pool: u64,
     pub status: MarketStatus,
     pub swept: bool,
+    /// Number of sealed (Privacy Rings) bets committed / revealed. Amounts are never on-chain.
+    pub sealed_committed: u32,
+    pub sealed_revealed: u32,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct SealedBet {
+    pub market: Pubkey,
+    pub bettor: Pubkey,
+    /// sha256(side_u8 || salt[32] || bettor)
+    pub commitment: [u8; 32],
+    /// sha256(amount_le_u64 || salt2[32] || bettor): binds the private Rings stake.
+    pub stake_commitment: [u8; 32],
+    pub side: u8,
+    pub revealed: bool,
+    pub committed_at: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct SealedResults {
+    pub market: Pubkey,
+    pub resolver: Pubkey,
+    pub survived: bool,
+    pub yes_total: u64,
+    pub no_total: u64,
+    pub payout_root: [u8; 32],
+    pub sealed_revealed: u32,
+    pub posted_at: i64,
+    pub bump: u8,
 }
 
 #[account]
@@ -681,6 +857,51 @@ pub struct UpdateConfig<'info> {
     pub admin: Signer<'info>,
     #[account(mut, seeds = [b"config"], bump = config.bump, has_one = admin @ StoviaError::Unauthorized)]
     pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptAdmin<'info> {
+    pub new_admin: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+#[derive(Accounts)]
+pub struct CommitSealedBet<'info> {
+    #[account(mut)]
+    pub bettor: Signer<'info>,
+    #[account(mut, seeds = [b"market", market.launch.as_ref()], bump)]
+    pub market: Box<Account<'info, Market>>,
+    #[account(init, payer = bettor, space = 8 + SealedBet::INIT_SPACE,
+        seeds = [b"sealed_bet", market.key().as_ref(), bettor.key().as_ref()], bump)]
+    pub sealed_bet: Box<Account<'info, SealedBet>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RevealSealedBet<'info> {
+    /// Anyone holding (side, salt) may reveal; the bettor key is bound inside the commitment.
+    pub revealer: Signer<'info>,
+    #[account(mut, seeds = [b"market", market.launch.as_ref()], bump)]
+    pub market: Account<'info, Market>,
+    #[account(mut, seeds = [b"sealed_bet", market.key().as_ref(), sealed_bet.bettor.as_ref()],
+        bump = sealed_bet.bump, has_one = market)]
+    pub sealed_bet: Account<'info, SealedBet>,
+}
+
+#[derive(Accounts)]
+pub struct PostSealedResults<'info> {
+    #[account(mut)]
+    pub resolver: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = resolver @ StoviaError::Unauthorized)]
+    pub config: Account<'info, Config>,
+    #[account(seeds = [b"market", market.launch.as_ref()], bump)]
+    pub market: Account<'info, Market>,
+    /// `init` makes posting once-only per market.
+    #[account(init, payer = resolver, space = 8 + SealedResults::INIT_SPACE,
+        seeds = [b"sealed_results", market.key().as_ref()], bump)]
+    pub sealed_results: Account<'info, SealedResults>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -897,6 +1118,52 @@ pub struct MarketSettled {
     pub unrevealed: u64,
 }
 
+#[event]
+pub struct AdminProposed {
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
+#[event]
+pub struct AdminAccepted {
+    pub previous_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+#[event]
+pub struct ResolverUpdated {
+    pub previous: Pubkey,
+    pub resolver: Pubkey,
+}
+
+#[event]
+pub struct SealedBetCommitted {
+    pub market: Pubkey,
+    pub bettor: Pubkey,
+    pub commitment: [u8; 32],
+    pub stake_commitment: [u8; 32],
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct SealedBetRevealed {
+    pub market: Pubkey,
+    pub bettor: Pubkey,
+    pub side: u8,
+}
+
+#[event]
+pub struct SealedResultsPosted {
+    pub market: Pubkey,
+    pub resolver: Pubkey,
+    pub survived: bool,
+    pub yes_total: u64,
+    pub no_total: u64,
+    pub payout_root: [u8; 32],
+    pub sealed_committed: u32,
+    pub sealed_revealed: u32,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimKind {
     Winnings,
@@ -974,4 +1241,6 @@ pub enum StoviaError {
     LosingBet,
     #[msg("Already swept")]
     AlreadySwept,
+    #[msg("Invalid admin key")]
+    InvalidAdmin,
 }

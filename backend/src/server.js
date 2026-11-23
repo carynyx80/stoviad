@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { VERSION, publicConfig } from './config.js';
 import { buildViews } from './views.js';
 import { normalise, decodeLogs } from './helius.js';
+import { heliusProxy } from './heliusProxy.js';
 
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms))]);
 
@@ -39,6 +40,9 @@ export async function buildServer({ cfg, store, logger }) {
       cb(null, ok);
     },
     methods: ['GET', 'POST', 'OPTIONS'],
+    // The SPR SDK reads these on prover/attestation responses.
+    exposedHeaders: ['Spr-Tee', 'Retry-After'],
+    maxAge: 600,
   });
 
   // ---- light rate limiting (webhook exempt: Helius bursts)
@@ -47,6 +51,9 @@ export async function buildServer({ cfg, store, logger }) {
     timeWindow: '1 minute',
     allowList: (req) => req.url.startsWith('/webhooks/') || req.url === '/health',
   });
+
+  // ---- Helius proxy (/rpc, /v1/spr/*): own content parsers + per-route limits, encapsulated
+  await app.register(heliusProxy, { cfg });
 
   // ---- chain
   const connection = new Connection(cfg.rpcUrl, { commitment: 'confirmed' });

@@ -8,7 +8,7 @@ import { WalletAdapterNetwork, type WalletError } from "@solana/wallet-adapter-b
 // drags in WalletConnect/reown/viem and floods webpack with warnings).
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { RPC_ENDPOINT } from "@/lib/config";
+import { RPC_ENDPOINT, WS_ENDPOINT } from "@/lib/config";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./wallet-theme.css";
@@ -28,7 +28,7 @@ export function SolanaProvider({ children }: { children: ReactNode }) {
   const onError = useCallback((_error: WalletError) => {}, []);
 
   return (
-    <ConnectionProvider endpoint={RPC_ENDPOINT} config={{ commitment: "confirmed" }}>
+    <ConnectionProvider endpoint={RPC_ENDPOINT} config={{ commitment: "confirmed", wsEndpoint: WS_ENDPOINT }}>
       <WalletProvider wallets={wallets} autoConnect onError={onError}>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>

@@ -1,4 +1,4 @@
-export type SectionKey = "launch" | "markets" | "bets" | "portfolio" | "creator" | "leaderboard";
+export type SectionKey = "launch" | "markets" | "bets" | "portfolio" | "creator" | "leaderboard" | "vault";
 
 export type Section = {
   key: SectionKey;
@@ -80,6 +80,17 @@ export const SECTIONS: Section[] = [
     cta: "Open leaderboard",
     tone: "blood",
     tag: "Rank",
+  },
+  {
+    key: "vault",
+    href: "/app/vault",
+    label: "Private vault",
+    title: "Private",
+    accent: "out of sight.",
+    pitch: "Shield SOL into Helius Privacy Rings, hold it unseen, withdraw it whenever you like. Your wallet, your keys.",
+    cta: "Open private vault",
+    tone: "gold",
+    tag: "Shield",
   },
 ];
 

@@ -178,6 +178,34 @@ function LeaderboardMotif() {
   );
 }
 
+function VaultMotif() {
+  return (
+    <svg viewBox="0 0 400 400" className="h-full w-full" aria-hidden>
+      {[150, 118, 86].map((r, i) => (
+        <motion.circle
+          key={r}
+          cx="200"
+          cy="200"
+          r={r}
+          fill="none"
+          stroke={i === 1 ? HOT : GOLD}
+          strokeOpacity={i === 1 ? 0.7 : 0.45}
+          strokeWidth={i === 2 ? 2 : 1}
+          strokeDasharray={i === 0 ? "2 10" : i === 1 ? "40 14" : undefined}
+          animate={{ rotate: i % 2 ? -360 : 360 }}
+          transition={{ duration: 28 - i * 6, repeat: Infinity, ease: "linear" }}
+          style={{ originX: "200px", originY: "200px" }}
+        />
+      ))}
+      <circle cx="200" cy="200" r="52" fill="var(--ink)" stroke={GOLD} strokeWidth="2" />
+      <rect x="180" y="196" width="40" height="32" rx="3" fill={GOLD} />
+      <path d="M186 196 v-10 a14 14 0 0 1 28 0 v10" fill="none" stroke={GOLD} strokeWidth="5" />
+      <circle cx="200" cy="210" r="4" fill="var(--ink)" />
+      <text x="200" y="300" textAnchor="middle" fill={BONE} fillOpacity="0.7" fontSize="11" letterSpacing="4" fontFamily="var(--font-mono)">SHIELDED</text>
+    </svg>
+  );
+}
+
 export function Motif({ k }: { k: SectionKey }) {
   switch (k) {
     case "launch": return <LaunchMotif />;
@@ -186,5 +214,6 @@ export function Motif({ k }: { k: SectionKey }) {
     case "portfolio": return <PortfolioMotif />;
     case "creator": return <CreatorMotif />;
     case "leaderboard": return <LeaderboardMotif />;
+    case "vault": return <VaultMotif />;
   }
 }

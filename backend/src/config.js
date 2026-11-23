@@ -34,6 +34,9 @@ const EnvSchema = z.object({
   NETWORK: z.preprocess(emptyToUndef, z.string().default('mainnet-beta')),
   HELIUS_RPC_URL: z.preprocess(emptyToUndef, z.string().url().default('https://api.mainnet-beta.solana.com')),
   HELIUS_WEBHOOK_SECRET: z.preprocess(emptyToUndef, z.string().optional()),
+  HELIUS_API_KEY: z.preprocess(emptyToUndef, z.string().trim().optional()),
+  PROXY_RPC_RATE_MAX: z.preprocess(emptyToUndef, z.coerce.number().int().positive().default(600)),
+  PROXY_SPR_RATE_MAX: z.preprocess(emptyToUndef, z.coerce.number().int().positive().default(300)),
   PROGRAM_ID: z.preprocess(emptyToUndef, pubkey.default(STOVIA.programId)),
   COMPANY_WALLET: z.preprocess(emptyToUndef, pubkey.default(STOVIA.companyWallet)),
   CORS_ORIGINS: z.preprocess(emptyToUndef, z.string().default(DEFAULT_CORS)),
@@ -41,6 +44,15 @@ const EnvSchema = z.object({
   RATE_LIMIT_MAX: z.preprocess(emptyToUndef, z.coerce.number().int().positive().default(300)),
   LOG_LEVEL: z.preprocess(emptyToUndef, z.string().default('info')),
 });
+
+/** Fallback: the api-key query param of a Helius HELIUS_RPC_URL. */
+function keyFromRpcUrl(url) {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)helius-rpc\.com$/.test(u.hostname)) return undefined;
+    return u.searchParams.get('api-key') || undefined;
+  } catch { return undefined; }
+}
 
 export function loadConfig(env = process.env) {
   const parsed = EnvSchema.safeParse(env);
@@ -59,6 +71,9 @@ export function loadConfig(env = process.env) {
     rpcUrl: e.HELIUS_RPC_URL,
     rpcIsDefault: !env.HELIUS_RPC_URL,
     webhookSecret: e.HELIUS_WEBHOOK_SECRET,
+    heliusApiKey: e.HELIUS_API_KEY ?? keyFromRpcUrl(e.HELIUS_RPC_URL),
+    proxyRpcRateMax: e.PROXY_RPC_RATE_MAX,
+    proxySprRateMax: e.PROXY_SPR_RATE_MAX,
     programId: e.PROGRAM_ID,
     companyWallet: e.COMPANY_WALLET,
     corsOrigins: e.CORS_ORIGINS.split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean),
@@ -78,6 +93,7 @@ export function publicConfig(cfg) {
     creatorFeeBps: STOVIA.creatorFeeBps,
     totalFeeBps: STOVIA.platformFeeBps + STOVIA.creatorFeeBps,
     privacyRings: { ...STOVIA.privacyRings },
+    heliusProxy: !!cfg.heliusApiKey,
     domain: STOVIA.domain,
     version: VERSION,
   };
